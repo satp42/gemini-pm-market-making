@@ -9,8 +9,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.api.router import router as api_router
+from src.api.ws import ConnectionManager
+from src.api.ws import router as ws_router
 from src.config import get_settings
 from src.db.database import close_db, init_db
+from src.gemini.client import GeminiClient
 
 logger = logging.getLogger(__name__)
 
@@ -27,35 +31,72 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     On startup:
     - Load settings
     - Initialize database engine
-    - Start the bot loop as a background task (when engine is implemented)
+    - Create GeminiClient
+    - Create ConnectionManager for WebSocket broadcasting
+    - Create and start the BotLoop (when engine is implemented)
 
     On shutdown:
     - Stop the bot loop
+    - Close the Gemini client
     - Close database connections
     """
     settings = get_settings()
     app.state.settings = settings
+    app.state.config_overrides = {}
 
     # Initialize database
     await init_db(settings)
+
+    # Create Gemini API client
+    gemini_client = GeminiClient(settings)
+    app.state.gemini_client = gemini_client
+
+    # Create WebSocket connection manager
+    ws_manager = ConnectionManager()
+    app.state.ws_manager = ws_manager
+
+    # Create and start the bot loop when engine is implemented
+    try:
+        from src.engine.loop import BotLoop
+
+        bot_loop = BotLoop(
+            settings=settings,
+            gemini_client=gemini_client,
+            ws_manager=ws_manager,
+        )
+        app.state.bot_loop = bot_loop
+
+        # Set on_tick callback to broadcast to WebSocket clients
+        bot_loop.on_tick = ws_manager.broadcast
+
+        logger.info("Bot loop initialized and ready")
+    except (ImportError, TypeError, AttributeError) as exc:
+        logger.warning("Bot loop not available (engine not yet implemented): %s", exc)
+        app.state.bot_loop = None
+
     logger.info(
         "Application started — env=%s, cycle=%ds",
         settings.gemini.env,
         settings.bot.bot_cycle_seconds,
     )
 
-    # Bot loop will be started here once engine/loop.py is implemented
-    # Example:
-    #   from src.engine.loop import BotLoop
-    #   bot_loop = BotLoop(settings)
-    #   app.state.bot_loop = bot_loop
-    #   await bot_loop.start()
-
     yield
 
-    # Shutdown: stop bot loop and close DB
-    # if hasattr(app.state, "bot_loop"):
-    #     await app.state.bot_loop.stop()
+    # Shutdown: stop bot loop, close Gemini client, close DB
+    bot_loop = getattr(app.state, "bot_loop", None)
+    if bot_loop is not None and getattr(bot_loop, "running", False):
+        try:
+            await bot_loop.stop()
+            logger.info("Bot loop stopped")
+        except Exception:
+            logger.exception("Error stopping bot loop during shutdown")
+
+    try:
+        await gemini_client.close()
+        logger.info("Gemini client closed")
+    except Exception:
+        logger.exception("Error closing Gemini client during shutdown")
+
     await close_db()
     logger.info("Application shut down cleanly")
 
@@ -85,21 +126,11 @@ def create_app() -> FastAPI:
     async def health_check() -> dict[str, str]:
         return {"status": "ok", "env": settings.gemini.env}
 
-    # Mount API router (placeholder import — router.py will be implemented)
-    try:
-        from src.api.router import router as api_router
+    # Mount API router
+    app.include_router(api_router, prefix="/api")
 
-        app.include_router(api_router, prefix="/api")
-    except ImportError:
-        logger.warning("API router not yet implemented, skipping mount")
-
-    # Mount WebSocket endpoint (placeholder — ws.py will be implemented)
-    try:
-        from src.api.ws import router as ws_router
-
-        app.include_router(ws_router)
-    except ImportError:
-        logger.warning("WebSocket router not yet implemented, skipping mount")
+    # Mount WebSocket router
+    app.include_router(ws_router)
 
     return app
 

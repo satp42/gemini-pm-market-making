@@ -10,7 +10,7 @@ import pytest
 
 from src.config import BotSettings
 from src.engine.scanner import MarketScanner
-from src.gemini.models import Contract, Event, EventsResponse
+from src.gemini.models import Contract, ContractPrices, Event, EventsResponse
 
 # -----------------------------------------------------------------------
 # Fixtures
@@ -22,11 +22,13 @@ def _make_contract(
     best_bid: Decimal | None = Decimal("0.40"),
     best_ask: Decimal | None = Decimal("0.60"),
 ) -> Contract:
+    prices = None
+    if best_bid is not None or best_ask is not None:
+        prices = ContractPrices(best_bid=best_bid, best_ask=best_ask)
     return Contract(
         instrument_symbol=symbol,
         outcome="yes",
-        best_bid=best_bid,
-        best_ask=best_ask,
+        prices=prices,
     )
 
 
@@ -75,8 +77,11 @@ class TestMarketScanner:
             pagination={},
         )
         scanner = MarketScanner(mock_client, bot_settings)
-        result = await scanner.scan()
-        assert result == ["SYM-A"]
+        symbols, titles, prices, categories = await scanner.scan()
+        assert symbols == ["SYM-A"]
+        assert "SYM-A" in prices
+        assert prices["SYM-A"]["best_bid"] == 0.40
+        assert prices["SYM-A"]["best_ask"] == 0.60
 
     async def test_scan_rejects_narrow_spread(
         self, mock_client: AsyncMock, bot_settings: BotSettings
@@ -87,8 +92,8 @@ class TestMarketScanner:
             pagination={},
         )
         scanner = MarketScanner(mock_client, bot_settings)
-        result = await scanner.scan()
-        assert result == []
+        symbols, _, _, _ = await scanner.scan()
+        assert symbols == []
 
     async def test_scan_rejects_missing_bid(
         self, mock_client: AsyncMock, bot_settings: BotSettings
@@ -99,8 +104,8 @@ class TestMarketScanner:
             pagination={},
         )
         scanner = MarketScanner(mock_client, bot_settings)
-        result = await scanner.scan()
-        assert result == []
+        symbols, _, _, _ = await scanner.scan()
+        assert symbols == []
 
     async def test_scan_rejects_missing_ask(
         self, mock_client: AsyncMock, bot_settings: BotSettings
@@ -111,8 +116,8 @@ class TestMarketScanner:
             pagination={},
         )
         scanner = MarketScanner(mock_client, bot_settings)
-        result = await scanner.scan()
-        assert result == []
+        symbols, _, _, _ = await scanner.scan()
+        assert symbols == []
 
     async def test_scan_rejects_excluded_symbol(
         self, mock_client: AsyncMock,
@@ -129,8 +134,8 @@ class TestMarketScanner:
             pagination={},
         )
         scanner = MarketScanner(mock_client, settings)
-        result = await scanner.scan()
-        assert result == []
+        symbols, _, _, _ = await scanner.scan()
+        assert symbols == []
 
     async def test_scan_rejects_expiring_soon(
         self, mock_client: AsyncMock, bot_settings: BotSettings
@@ -140,8 +145,8 @@ class TestMarketScanner:
             pagination={},
         )
         scanner = MarketScanner(mock_client, bot_settings)
-        result = await scanner.scan()
-        assert result == []
+        symbols, _, _, _ = await scanner.scan()
+        assert symbols == []
 
     async def test_scan_newly_listed(
         self, mock_client: AsyncMock, bot_settings: BotSettings
@@ -165,9 +170,9 @@ class TestMarketScanner:
         )
         mock_client.get_events.return_value = EventsResponse(events=[event], pagination={})
         scanner = MarketScanner(mock_client, bot_settings)
-        result = await scanner.scan()
+        symbols, _, _, _ = await scanner.scan()
         # No expiry means we cannot reject on time grounds, so it passes
-        assert result == ["SYM-NOEXP"]
+        assert symbols == ["SYM-NOEXP"]
 
     async def test_scan_multiple_contracts_in_event(
         self, mock_client: AsyncMock, bot_settings: BotSettings
@@ -182,5 +187,5 @@ class TestMarketScanner:
             pagination={},
         )
         scanner = MarketScanner(mock_client, bot_settings)
-        result = await scanner.scan()
-        assert result == ["SYM-X"]
+        symbols, _, _, _ = await scanner.scan()
+        assert symbols == ["SYM-X"]

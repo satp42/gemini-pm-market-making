@@ -52,7 +52,7 @@ export default function DashboardPage() {
   return (
     <div className="flex flex-col min-h-screen">
       {/* Fixed status bar */}
-      <StatusBar status={status} isConnected={ws.isConnected} />
+      <StatusBar status={status} isConnected={ws.isConnected} quotingMode={markets[0]?.quotingMode} />
 
       {/* Main content */}
       <main className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6 pt-4">

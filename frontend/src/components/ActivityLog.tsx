@@ -15,6 +15,7 @@ const typeConfig: Record<
   order_filled: { color: "text-emerald-400", icon: "[F]" },
   order_cancelled: { color: "text-gray-400", icon: "[X]" },
   risk_alert: { color: "text-red-400", icon: "!!!" },
+  mode_switch: { color: "text-purple-400", icon: "[M]" },
   info: { color: "text-gray-500", icon: "---" },
 };
 

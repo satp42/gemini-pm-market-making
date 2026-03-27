@@ -84,6 +84,29 @@ class AppSettings(BaseSettings):
     data_retention_days: int = Field(default=7, alias="DATA_RETENTION_DAYS")
 
 
+class PerformativeSettings(BaseSettings):
+    """Performative market-making model parameters."""
+
+    model_config = SettingsConfigDict(env_prefix="PERF_")
+
+    quoting_mode: str = Field(default="theta", description="Quoting mode: as, performative, theta")
+    xi_default: float = Field(default=0.5, description="Default xi when insufficient trade data")
+    xi_min_trades: int = Field(default=15, description="Minimum trades for xi estimation")
+    xi_clamp_min: float = Field(default=0.01, description="Minimum xi clamp value")
+    xi_clamp_max: float = Field(default=20.0, description="Maximum xi clamp value")
+    r_squared_threshold: float = Field(default=0.1, description="Minimum r-squared for xi")
+    q_ref: float = Field(default=0.0, description="Reference inventory for performative model")
+    theta_optimization_trials: int = Field(
+        default=100, description="Optuna trials per category"
+    )
+    theta_optimization_simulations: int = Field(
+        default=100, description="Simulations per Optuna trial"
+    )
+    theta_auto_optimize_hours: float = Field(
+        default=24.0, description="Hours between auto theta optimization"
+    )
+
+
 class Settings(BaseSettings):
     """Root settings object that composes all sub-settings."""
 
@@ -99,6 +122,7 @@ class Settings(BaseSettings):
     risk: RiskSettings = Field(default_factory=RiskSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     app: AppSettings = Field(default_factory=AppSettings)
+    performative: PerformativeSettings = Field(default_factory=PerformativeSettings)
 
 
 def get_settings() -> Settings:

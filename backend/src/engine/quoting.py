@@ -20,6 +20,12 @@ class Quote:
     gamma: float
     t_minus_t: float
     k: float
+    # Performative market-making optional fields (None for A&S mode)
+    xi: float | None = None
+    theta0: float | None = None
+    theta1: float | None = None
+    theta2: float | None = None
+    quoting_mode: str | None = None
 
 
 def compute_quote(

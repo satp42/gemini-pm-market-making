@@ -23,11 +23,15 @@ class MarketScanner:
     # Public API
     # ------------------------------------------------------------------
 
-    async def scan(self) -> tuple[list[str], dict[str, str]]:
+    async def scan(
+        self,
+    ) -> tuple[list[str], dict[str, str], dict[str, dict], dict[str, str]]:
         """Return instrument symbols eligible for quoting from active events.
 
-        Returns a tuple of (symbols, symbol_titles) where symbol_titles maps
-        each symbol to its parent event title.
+        Returns a tuple of (symbols, symbol_titles, symbol_prices,
+        symbol_categories) where symbol_titles maps each symbol to its parent
+        event title, symbol_prices maps each symbol to its contract price data,
+        and symbol_categories maps each symbol to its event category.
 
         Filters applied per contract:
         1. Contract must have both a best bid and best ask.
@@ -40,6 +44,8 @@ class MarketScanner:
 
         selected: list[str] = []
         symbol_titles: dict[str, str] = {}
+        symbol_prices: dict[str, dict] = {}
+        symbol_categories: dict[str, str] = {}
         now = datetime.now(timezone.utc)
 
         logger.info(
@@ -69,6 +75,13 @@ class MarketScanner:
                 if self._is_eligible(contract, symbol, hours_to_expiry):
                     selected.append(symbol)
                     symbol_titles[symbol] = event.title
+                    if event.category:
+                        symbol_categories[symbol] = event.category
+                    symbol_prices[symbol] = {
+                        "best_bid": float(contract.best_bid) if contract.best_bid is not None else None,
+                        "best_ask": float(contract.best_ask) if contract.best_ask is not None else None,
+                        "last_trade_price": float(contract.last_trade_price) if contract.last_trade_price is not None else None,
+                    }
                     spread_val = (
                         float(contract.best_ask - contract.best_bid)
                         if contract.best_ask is not None and contract.best_bid is not None
@@ -82,7 +95,7 @@ class MarketScanner:
                     )
 
         logger.info("Scanner found %d eligible markets", len(selected))
-        return selected, symbol_titles
+        return selected, symbol_titles, symbol_prices, symbol_categories
 
     async def scan_newly_listed(self) -> list[str]:
         """Return symbols from newly listed events that pass filters."""

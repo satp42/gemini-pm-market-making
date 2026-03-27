@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.database import get_session
+from src.db.database import get_session, get_session_factory
 from src.db.models import OrderRecord, PnlSnapshot, PositionSnapshot, Quote
+from src.engine.optimizer import run_theta_optimization
 from src.gemini.client import GeminiAPIError
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,12 @@ class MarketSummary(BaseModel):
     sigmaSquared: float
     gamma: float
     timeRemaining: float
+    # Performative market-making fields (T024)
+    xi: float | None = None
+    theta0: float | None = None
+    theta1: float | None = None
+    theta2: float | None = None
+    quotingMode: str | None = None
 
 
 class QuoteHistoryEntry(BaseModel):
@@ -59,6 +67,12 @@ class QuoteHistoryEntry(BaseModel):
     sigmaSquared: float
     gamma: float
     timeRemaining: float
+    # Performative market-making fields (T024)
+    xi: float | None = None
+    theta0: float | None = None
+    theta1: float | None = None
+    theta2: float | None = None
+    quotingMode: str | None = None
 
 
 class OrderEntry(BaseModel):
@@ -120,11 +134,36 @@ class ConfigUpdateRequest(BaseModel):
     max_inventory_per_symbol: int | None = None
     max_total_exposure: int | None = None
     risk_widen_threshold: float | None = None
+    # Performative market-making fields (T023)
+    quoting_mode: str | None = None
+    xi_default: float | None = None
+    xi_min_trades: int | None = None
+    xi_clamp_min: float | None = None
+    xi_clamp_max: float | None = None
+    q_ref: float | None = None
+
+    @field_validator("quoting_mode")
+    @classmethod
+    def validate_quoting_mode(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("as", "performative", "theta"):
+            raise ValueError("quoting_mode must be one of: as, performative, theta")
+        return v
 
 
 # ---------------------------------------------------------------------------
 # Helper to get bot loop safely
 # ---------------------------------------------------------------------------
+
+
+def _performative_fields(q) -> dict:
+    """Extract nullable-float performative fields from a quote record."""
+    return dict(
+        xi=float(q.xi) if q.xi is not None else None,
+        theta0=float(q.theta0) if q.theta0 is not None else None,
+        theta1=float(q.theta1) if q.theta1 is not None else None,
+        theta2=float(q.theta2) if q.theta2 is not None else None,
+        quotingMode=q.quoting_mode,
+    )
 
 
 def _get_bot_loop(request: Request) -> Any:
@@ -218,6 +257,7 @@ async def get_markets(
             sigmaSquared=float(q.sigma_sq),
             gamma=float(q.gamma),
             timeRemaining=float(q.t_minus_t),
+            **_performative_fields(q),
         )
         for q in quotes
     ]
@@ -255,6 +295,7 @@ async def get_market_detail(
             sigmaSquared=float(q.sigma_sq),
             gamma=float(q.gamma),
             timeRemaining=float(q.t_minus_t),
+            **_performative_fields(q),
         )
         for q in quotes
     ]
@@ -272,6 +313,7 @@ async def get_market_detail(
         sigmaSquared=float(latest_quote.sigma_sq),
         gamma=float(latest_quote.gamma),
         timeRemaining=float(latest_quote.t_minus_t),
+        **_performative_fields(latest_quote),
     )
 
     # Recent trades: filled orders for this symbol (last 50)
@@ -509,7 +551,136 @@ async def update_config(
         "risk_widen_threshold": overrides.get(
             "risk_widen_threshold", settings.risk.risk_widen_threshold
         ),
+        # Performative params (T025)
+        "quoting_mode": overrides.get(
+            "quoting_mode", settings.performative.quoting_mode
+        ),
+        "xi_default": overrides.get(
+            "xi_default", settings.performative.xi_default
+        ),
+        "xi_min_trades": overrides.get(
+            "xi_min_trades", settings.performative.xi_min_trades
+        ),
+        "xi_clamp_min": overrides.get(
+            "xi_clamp_min", settings.performative.xi_clamp_min
+        ),
+        "xi_clamp_max": overrides.get(
+            "xi_clamp_max", settings.performative.xi_clamp_max
+        ),
+        "q_ref": overrides.get(
+            "q_ref", settings.performative.q_ref
+        ),
     }
 
     logger.info("Config overrides updated: %s", update_data)
     return {"overrides": overrides, "effective": effective}
+
+
+# ---------------------------------------------------------------------------
+# Theta optimization endpoints (T026, T027)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/optimize/theta", status_code=202)
+async def start_theta_optimization(
+    request: Request,
+    category: str | None = Query(default=None, description="Specific category to optimize"),
+) -> dict[str, Any]:
+    """Trigger theta optimization for all (or a specific) prediction market category.
+
+    Returns 202 Accepted immediately; optimization runs in background.
+    Returns 409 if optimization is already running.
+    Returns 503 if bot loop is not initialized.
+    """
+    # Check bot loop availability
+    bot_loop = _get_bot_loop(request)
+    if bot_loop is None:
+        raise HTTPException(status_code=503, detail="Bot loop not initialized")
+
+    # Check if optimization is already running
+    progress = getattr(request.app.state, "optimization_progress", None)
+    if progress is None:
+        raise HTTPException(status_code=503, detail="Optimization progress not initialized")
+    if progress.running:
+        raise HTTPException(status_code=409, detail="Optimization is already running")
+
+    # Derive categories from bot_loop.symbol_categories
+    symbol_categories: dict[str, str] = bot_loop.symbol_categories
+    # Build reverse map: category -> list of symbols
+    category_symbols: dict[str, list[str]] = {}
+    for sym, cat in symbol_categories.items():
+        if cat:
+            category_symbols.setdefault(cat, []).append(sym)
+
+    # Filter to specific category if requested
+    if category is not None:
+        if category in category_symbols:
+            category_symbols = {category: category_symbols[category]}
+        else:
+            category_symbols = {category: []}
+
+    target_categories = list(category_symbols.keys())
+
+    # Fetch trade data for each symbol in target categories
+    client = bot_loop.client
+    categories_data: dict[str, list[list[float]]] = {}
+    for cat, symbols in category_symbols.items():
+        price_series_list: list[list[float]] = []
+        for sym in symbols:
+            try:
+                trades = await client.get_trades(sym, limit=200)
+                if trades:
+                    prices = [float(t.price) for t in trades]
+                    price_series_list.append(prices)
+            except Exception:
+                logger.warning("Failed to fetch trades for %s, skipping", sym)
+        categories_data[cat] = price_series_list
+
+    settings = _get_settings(request)
+
+    # Launch background optimization
+    asyncio.create_task(
+        run_theta_optimization(
+            categories=categories_data,
+            progress=progress,
+            session_factory=get_session_factory(),
+            settings=settings.performative,
+            gamma=settings.avellaneda_stoikov.gamma,
+            k=settings.avellaneda_stoikov.k,
+            sigma_default=settings.avellaneda_stoikov.sigma_default,
+        )
+    )
+
+    return {"status": "started", "categories": target_categories}
+
+
+@router.get("/optimize/theta/status")
+async def get_theta_optimization_status(request: Request) -> dict[str, Any]:
+    """Get current and last theta optimization status."""
+    progress = getattr(request.app.state, "optimization_progress", None)
+    if progress is None:
+        return {
+            "running": False,
+            "currentTrial": 0,
+            "totalTrials": 0,
+            "bestValue": None,
+            "currentCategory": "",
+            "categoriesCompleted": [],
+            "startedAt": None,
+            "completedAt": None,
+            "failed": False,
+            "errorMessage": "",
+        }
+
+    return {
+        "running": progress.running,
+        "currentTrial": progress.current_trial,
+        "totalTrials": progress.total_trials,
+        "bestValue": progress.best_value,
+        "currentCategory": progress.current_category,
+        "categoriesCompleted": list(progress.categories_completed),
+        "startedAt": progress.started_at.isoformat() if progress.started_at else None,
+        "completedAt": progress.completed_at.isoformat() if progress.completed_at else None,
+        "failed": progress.failed,
+        "errorMessage": progress.error_message,
+    }

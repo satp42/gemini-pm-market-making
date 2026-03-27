@@ -44,6 +44,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.settings = settings
     app.state.config_overrides = {}
 
+    # Initialize optimization progress (T028)
+    from src.engine.optimizer import OptimizationProgress
+
+    app.state.optimization_progress = OptimizationProgress()
+
     # Initialize database
     await init_db(settings)
 
@@ -63,6 +68,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             settings=settings,
             client=gemini_client,
             session_factory=get_session_factory(),
+            config_overrides=app.state.config_overrides,
         )
         app.state.bot_loop = bot_loop
 

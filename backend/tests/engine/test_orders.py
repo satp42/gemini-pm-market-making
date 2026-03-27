@@ -92,7 +92,7 @@ class TestPlaceQuotes:
         mock_client.place_order.side_effect = [bid_resp, ask_resp]
 
         mgr = OrderManager(mock_client)
-        bid, ask = await mgr.place_quotes("SYM", _quote())
+        bid, ask = await mgr.place_quotes("SYM", _quote(), inventory=1.0)
 
         assert bid is not None
         assert ask is not None
@@ -105,7 +105,7 @@ class TestPlaceQuotes:
         mock_client.place_order.side_effect = [RuntimeError("bid fail"), ask_resp]
 
         mgr = OrderManager(mock_client)
-        bid, ask = await mgr.place_quotes("SYM", _quote())
+        bid, ask = await mgr.place_quotes("SYM", _quote(), inventory=1.0)
 
         assert bid is None
         assert ask is not None
@@ -133,7 +133,7 @@ class TestPlaceQuotes:
         mock_client.place_order.return_value = _order()
         mgr = OrderManager(mock_client)
         q = _quote(bid=0.40, ask=0.60)
-        await mgr.place_quotes("MY-SYM", q, quantity=5)
+        await mgr.place_quotes("MY-SYM", q, quantity=5, inventory=1.0)
 
         calls = mock_client.place_order.call_args_list
         # Bid call

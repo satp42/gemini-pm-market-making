@@ -7,7 +7,17 @@ import { ApiRequestError, startBot, stopBot } from "@/lib/api";
 interface StatusBarProps {
   status: BotStatus | null;
   isConnected: boolean;
+  quotingMode?: string;
 }
+
+const MODE_LABELS: Record<string, string> = {
+  as: "Avellaneda-Stoikov",
+  performative: "Performative",
+  theta: "Theta-Enhanced",
+};
+
+export const getQuotingModeLabel = (mode?: string): string =>
+  (mode && MODE_LABELS[mode]) || "--";
 
 const formatUptime = (seconds: number): string => {
   const h = Math.floor(seconds / 3600);
@@ -16,7 +26,7 @@ const formatUptime = (seconds: number): string => {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 };
 
-const StatusBar = ({ status, isConnected }: StatusBarProps) => {
+const StatusBar = ({ status, isConnected, quotingMode }: StatusBarProps) => {
   const [toggling, setToggling] = useState(false);
 
   const handleToggle = useCallback(async () => {
@@ -75,6 +85,12 @@ const StatusBar = ({ status, isConnected }: StatusBarProps) => {
           <span className="text-gray-500 mr-1">Markets:</span>
           <span className="font-mono text-gray-200">
             {status?.activeMarkets ?? 0}
+          </span>
+        </div>
+        <div>
+          <span className="text-gray-500 mr-1">Mode:</span>
+          <span className="font-mono text-gray-200">
+            {getQuotingModeLabel(quotingMode)}
           </span>
         </div>
       </div>

@@ -86,11 +86,24 @@ class TestComputeQuote:
         )
         assert q.ask_price <= 0.99
 
-    def test_quote_is_frozen_dataclass(self) -> None:
-        """Quote should be immutable."""
+    def test_quote_is_mutable_dataclass_with_15_fields(self) -> None:
+        """Quote should be a mutable dataclass with 15 fields (10 original + 5 optional)."""
+        from dataclasses import fields as dc_fields
+
+        from src.engine.quoting import Quote
+
         q = compute_quote(inventory=0, **_DEFAULT)
-        with pytest.raises(AttributeError):
-            q.bid_price = 0.99  # type: ignore[misc]
+        # Verify 15 fields total
+        assert len(dc_fields(Quote)) == 15
+        # Verify the 5 new optional fields default to None
+        assert q.xi is None
+        assert q.theta0 is None
+        assert q.theta1 is None
+        assert q.theta2 is None
+        assert q.quoting_mode is None
+        # Verify Quote is mutable (setting a field does not raise)
+        q.bid_price = 0.99
+        assert q.bid_price == 0.99
 
     def test_bid_always_less_than_or_equal_ask(self) -> None:
         """Across various parameter sets, bid <= ask."""

@@ -211,32 +211,60 @@ const ReservationPriceChart = ({ markets }: ReservationPriceChartProps) => {
 
       {/* Selected market detail */}
       {selectedMarket && (
-        <div className="mt-3 grid grid-cols-4 gap-3 text-xs">
-          <div className="bg-gray-800/50 rounded px-2 py-1.5">
-            <span className="text-gray-500 block">Mid</span>
-            <span className="text-blue-400 font-mono">
-              ${selectedMarket.midPrice.toFixed(4)}
-            </span>
+        <>
+          <div className="mt-3 grid grid-cols-4 gap-3 text-xs">
+            <div className="bg-gray-800/50 rounded px-2 py-1.5">
+              <span className="text-gray-500 block">Mid</span>
+              <span className="text-blue-400 font-mono">
+                ${selectedMarket.midPrice.toFixed(4)}
+              </span>
+            </div>
+            <div className="bg-gray-800/50 rounded px-2 py-1.5">
+              <span className="text-gray-500 block">Reservation</span>
+              <span className="text-orange-400 font-mono">
+                ${selectedMarket.reservationPrice.toFixed(4)}
+              </span>
+            </div>
+            <div className="bg-gray-800/50 rounded px-2 py-1.5">
+              <span className="text-gray-500 block">Gamma</span>
+              <span className="text-gray-200 font-mono">
+                {selectedMarket.gamma.toFixed(4)}
+              </span>
+            </div>
+            <div className="bg-gray-800/50 rounded px-2 py-1.5">
+              <span className="text-gray-500 block">Sigma^2</span>
+              <span className="text-gray-200 font-mono">
+                {selectedMarket.sigmaSquared.toFixed(6)}
+              </span>
+            </div>
           </div>
-          <div className="bg-gray-800/50 rounded px-2 py-1.5">
-            <span className="text-gray-500 block">Reservation</span>
-            <span className="text-orange-400 font-mono">
-              ${selectedMarket.reservationPrice.toFixed(4)}
-            </span>
+          <div className="mt-2 grid grid-cols-4 gap-3 text-xs">
+            <div className="bg-gray-800/50 rounded px-2 py-1.5">
+              <span className="text-gray-500 block">Xi</span>
+              <span className="text-purple-400 font-mono">
+                {selectedMarket.xi?.toFixed(3) ?? "--"}
+              </span>
+            </div>
+            <div className="bg-gray-800/50 rounded px-2 py-1.5">
+              <span className="text-gray-500 block">Theta0</span>
+              <span className="text-gray-200 font-mono">
+                {selectedMarket.theta0?.toFixed(3) ?? "--"}
+              </span>
+            </div>
+            <div className="bg-gray-800/50 rounded px-2 py-1.5">
+              <span className="text-gray-500 block">Theta1</span>
+              <span className="text-gray-200 font-mono">
+                {selectedMarket.theta1?.toFixed(3) ?? "--"}
+              </span>
+            </div>
+            <div className="bg-gray-800/50 rounded px-2 py-1.5">
+              <span className="text-gray-500 block">Theta2</span>
+              <span className="text-gray-200 font-mono">
+                {selectedMarket.theta2?.toFixed(3) ?? "--"}
+              </span>
+            </div>
           </div>
-          <div className="bg-gray-800/50 rounded px-2 py-1.5">
-            <span className="text-gray-500 block">Gamma</span>
-            <span className="text-gray-200 font-mono">
-              {selectedMarket.gamma.toFixed(4)}
-            </span>
-          </div>
-          <div className="bg-gray-800/50 rounded px-2 py-1.5">
-            <span className="text-gray-500 block">Sigma^2</span>
-            <span className="text-gray-200 font-mono">
-              {selectedMarket.sigmaSquared.toFixed(6)}
-            </span>
-          </div>
-        </div>
+        </>
       )}
     </div>
   );

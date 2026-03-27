@@ -9,17 +9,20 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.config import Settings
-from src.db.models import OrderRecord, PnlSnapshot, PositionSnapshot
+from src.db.models import OrderRecord, PnlSnapshot, PositionSnapshot, ThetaParameter, XiEstimateRecord
 from src.db.models import Quote as QuoteRecord
 from src.engine.book import OrderBookMonitor
 from src.engine.orders import OrderManager
+from src.engine.performative import compute_performative_quote
 from src.engine.positions import PositionTracker
 from src.engine.quoting import Quote, compute_quote, estimate_variance
 from src.engine.risk import RiskAction, RiskManager
 from src.engine.scanner import MarketScanner
+from src.engine.xi import XiEstimate, estimate_xi
 from src.gemini.client import GeminiClient
 
 logger = logging.getLogger(__name__)
@@ -36,10 +39,14 @@ class BotLoop:
         settings: Settings,
         client: GeminiClient,
         session_factory: async_sessionmaker[AsyncSession],
+        config_overrides: dict[str, Any] | None = None,
     ) -> None:
         self._settings = settings
         self._client = client
         self._session_factory = session_factory
+        self._config_overrides: dict[str, Any] = (
+            config_overrides if config_overrides is not None else {}
+        )
 
         # Engine components
         self._scanner = MarketScanner(client, settings.bot)
@@ -53,6 +60,9 @@ class BotLoop:
         self._started_at: datetime | None = None
         self._active_symbols: list[str] = []
         self._symbol_titles: dict[str, str] = {}
+        self._symbol_prices: dict[str, dict] = {}
+        self._symbol_categories: dict[str, str] = {}
+        self._theta_cache: dict[str, tuple[float, float, float]] = {}
         self._task: asyncio.Task[None] | None = None
         self._last_scan_time: float = 0.0
 
@@ -78,6 +88,14 @@ class BotLoop:
     @property
     def symbol_titles(self) -> dict[str, str]:
         return dict(self._symbol_titles)
+
+    @property
+    def client(self) -> GeminiClient:
+        return self._client
+
+    @property
+    def symbol_categories(self) -> dict[str, str]:
+        return dict(self._symbol_categories)
 
     @property
     def risk_manager(self) -> RiskManager:
@@ -242,8 +260,9 @@ class BotLoop:
         inventories: dict[str, float],
     ) -> dict[str, Any] | None:
         """Run one full cycle for a single symbol. Returns tick data dict or None."""
-        # a. Market state
-        state = await self._book.get_market_state(symbol)
+        # a. Market state (use prefetched prices from the events API)
+        prefetched = self._symbol_prices.get(symbol)
+        state = await self._book.get_market_state(symbol, prefetched_prices=prefetched)
         if state is None:
             logger.debug("No market state for %s -- skipping", symbol)
             return None
@@ -284,14 +303,79 @@ class BotLoop:
         gamma = self._settings.avellaneda_stoikov.gamma
         k = self._settings.avellaneda_stoikov.k
 
-        quote = compute_quote(
-            mid_price=state.mid_price,
-            inventory=inventory,
-            gamma=gamma,
-            sigma_sq=sigma_sq,
-            t_minus_t=t_minus_t,
-            k=k,
+        quoting_mode = self._config_overrides.get(
+            "quoting_mode", self._settings.performative.quoting_mode
         )
+
+        if quoting_mode == "as":
+            quote = compute_quote(
+                mid_price=state.mid_price,
+                inventory=inventory,
+                gamma=gamma,
+                sigma_sq=sigma_sq,
+                t_minus_t=t_minus_t,
+                k=k,
+            )
+        elif quoting_mode in ("performative", "theta"):
+            # (a) Estimate xi from trade data
+            perf = self._settings.performative
+            xi_est = estimate_xi(
+                trade_prices=state.trade_prices,
+                trade_timestamps=state.trade_timestamps,
+                xi_default=perf.xi_default,
+                xi_min_trades=perf.xi_min_trades,
+                xi_clamp_min=perf.xi_clamp_min,
+                xi_clamp_max=perf.xi_clamp_max,
+                r_squared_threshold=perf.r_squared_threshold,
+            )
+
+            # (b) Lookup theta from cache
+            category = self._symbol_categories.get(symbol, "")
+            theta_tuple = self._theta_cache.get(category, None)
+
+            # (c) If mode=="theta" and no theta found, fall back to performative
+            if theta_tuple is not None:
+                theta0, theta1, theta2 = theta_tuple
+            else:
+                if quoting_mode == "theta":
+                    logger.warning(
+                        "No theta parameters for category %r (symbol %s), "
+                        "falling back to performative defaults (1,1,1)",
+                        category,
+                        symbol,
+                    )
+                theta0, theta1, theta2 = 1.0, 1.0, 1.0
+
+            # (d) Compute performative quote
+            quote = compute_performative_quote(
+                mid_price=state.mid_price,
+                inventory=inventory,
+                gamma=gamma,
+                sigma_sq=sigma_sq,
+                t_minus_t=t_minus_t,
+                k=k,
+                xi=xi_est.xi,
+                theta0=theta0,
+                theta1=theta1,
+                theta2=theta2,
+                q_ref=perf.q_ref,
+            )
+            # Tag with actual mode used
+            quote.quoting_mode = quoting_mode
+
+            # Persist xi estimate (fire-and-forget)
+            asyncio.create_task(self._persist_xi_estimate(symbol, xi_est))
+        else:
+            # Unknown mode -- default to A&S with warning
+            logger.warning("Unknown quoting_mode %r, defaulting to A&S", quoting_mode)
+            quote = compute_quote(
+                mid_price=state.mid_price,
+                inventory=inventory,
+                gamma=gamma,
+                sigma_sq=sigma_sq,
+                t_minus_t=t_minus_t,
+                k=k,
+            )
 
         # Widen spread if risk says so
         if risk_action == RiskAction.WIDEN_SPREAD:
@@ -311,6 +395,11 @@ class BotLoop:
                 gamma=quote.gamma,
                 t_minus_t=quote.t_minus_t,
                 k=quote.k,
+                xi=quote.xi,
+                theta0=quote.theta0,
+                theta1=quote.theta1,
+                theta2=quote.theta2,
+                quoting_mode=quote.quoting_mode,
             )
 
         # g. Cancel stale, place new
@@ -335,6 +424,26 @@ class BotLoop:
             "inventory": inventory,
             "mid_price": state.mid_price,
             "sigma_sq": sigma_sq,
+            "xi": quote.xi,
+            "theta0": quote.theta0,
+            "theta1": quote.theta1,
+            "theta2": quote.theta2,
+            "quoting_mode": quote.quoting_mode,
+            "quote_summary": {
+                "symbol": symbol,
+                "title": self._symbol_titles.get(symbol, symbol),
+                "bid": quote.bid_price,
+                "ask": quote.ask_price,
+                "reservation": quote.reservation_price,
+                "spread": quote.spread,
+                "midPrice": state.mid_price,
+                "inventory": inventory,
+                "xi": quote.xi,
+                "theta0": quote.theta0,
+                "theta1": quote.theta1,
+                "theta2": quote.theta2,
+                "quotingMode": quote.quoting_mode,
+            },
         }
 
     # ------------------------------------------------------------------
@@ -346,9 +455,12 @@ class BotLoop:
         now = time.monotonic()
         if now - self._last_scan_time >= self._settings.bot.scanner_cycle_seconds:
             try:
-                symbols, titles = await self._scanner.scan()
+                symbols, titles, prices, categories = await self._scanner.scan()
                 self._active_symbols = symbols
                 self._symbol_titles.update(titles)
+                self._symbol_prices = prices
+                self._symbol_categories = categories
+                self._theta_cache = await self._load_theta_cache()
                 self._last_scan_time = now
             except Exception:
                 logger.exception("Scanner failed -- keeping previous symbol list")
@@ -380,8 +492,45 @@ class BotLoop:
                 )
 
     # ------------------------------------------------------------------
+    # Theta cache
+    # ------------------------------------------------------------------
+
+    async def _load_theta_cache(self) -> dict[str, tuple[float, float, float]]:
+        """Query ThetaParameter table and return {category: (theta0, theta1, theta2)}."""
+        cache: dict[str, tuple[float, float, float]] = {}
+        try:
+            async with self._session_factory() as session:
+                result = await session.execute(select(ThetaParameter))
+                for row in result.scalars().all():
+                    cache[row.category] = (
+                        float(row.theta0),
+                        float(row.theta1),
+                        float(row.theta2),
+                    )
+        except Exception:
+            logger.exception("Failed to load theta cache from DB")
+        return cache
+
+    # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
+
+    async def _persist_xi_estimate(self, symbol: str, xi_est: XiEstimate) -> None:
+        """Fire-and-forget: write XiEstimateRecord to the database."""
+        try:
+            async with self._session_factory() as session:
+                session.add(
+                    XiEstimateRecord(
+                        symbol=symbol,
+                        xi=xi_est.xi,
+                        r_squared=xi_est.r_squared,
+                        num_trades=xi_est.num_trades,
+                        used_default=xi_est.used_default,
+                    )
+                )
+                await session.commit()
+        except Exception:
+            logger.exception("Failed to persist xi estimate for %s", symbol)
 
     async def _persist_quote(
         self,
@@ -407,6 +556,11 @@ class BotLoop:
                         sigma_sq=quote.sigma_sq,
                         gamma=quote.gamma,
                         t_minus_t=quote.t_minus_t,
+                        xi=quote.xi,
+                        theta0=quote.theta0,
+                        theta1=quote.theta1,
+                        theta2=quote.theta2,
+                        quoting_mode=quote.quoting_mode,
                     )
                 )
 

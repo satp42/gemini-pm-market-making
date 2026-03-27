@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Index, Integer, Numeric, String, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Index, Integer, Numeric, String, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -33,6 +33,12 @@ class Quote(Base):
     sigma_sq: Mapped[float] = mapped_column(Numeric(18, 8), nullable=False)
     gamma: Mapped[float] = mapped_column(Numeric(18, 8), nullable=False)
     t_minus_t: Mapped[float] = mapped_column(Numeric(18, 8), nullable=False)
+    # Performative market-making fields (nullable for backward compat)
+    xi: Mapped[float | None] = mapped_column(Numeric(18, 8), nullable=True)
+    theta0: Mapped[float | None] = mapped_column(Numeric(18, 8), nullable=True)
+    theta1: Mapped[float | None] = mapped_column(Numeric(18, 8), nullable=True)
+    theta2: Mapped[float | None] = mapped_column(Numeric(18, 8), nullable=True)
+    quoting_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     __table_args__ = (
         Index("ix_quotes_timestamp", "timestamp"),
@@ -104,4 +110,49 @@ class PnlSnapshot(Base):
 
     __table_args__ = (
         Index("ix_pnl_snapshots_timestamp", "timestamp"),
+    )
+
+
+class ThetaParameter(Base):
+    """Optimized theta parameters per market category."""
+
+    __tablename__ = "theta_parameters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    category: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    theta0: Mapped[float] = mapped_column(Numeric(18, 8), nullable=False)
+    theta1: Mapped[float] = mapped_column(Numeric(18, 8), nullable=False)
+    theta2: Mapped[float] = mapped_column(Numeric(18, 8), nullable=False)
+    xi_value: Mapped[float] = mapped_column(Numeric(18, 8), nullable=False)
+    objective_value: Mapped[float] = mapped_column(Numeric(18, 8), nullable=False)
+    num_trials: Mapped[int] = mapped_column(Integer, nullable=False)
+    optimized_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class XiEstimateRecord(Base):
+    """Record of xi estimation per symbol per bot cycle (observability)."""
+
+    __tablename__ = "xi_estimates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    xi: Mapped[float] = mapped_column(Numeric(18, 8), nullable=False)
+    r_squared: Mapped[float | None] = mapped_column(Numeric(18, 8), nullable=True)
+    num_trades: Mapped[int] = mapped_column(Integer, nullable=False)
+    used_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        Index("ix_xi_estimates_timestamp", "timestamp"),
+        Index("ix_xi_estimates_symbol", "symbol"),
     )

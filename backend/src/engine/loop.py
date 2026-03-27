@@ -64,6 +64,7 @@ class BotLoop:
         self._symbol_categories: dict[str, str] = {}
         self._theta_cache: dict[str, tuple[float, float, float]] = {}
         self._task: asyncio.Task[None] | None = None
+        self._background_tasks: set[asyncio.Task] = set()
         self._last_scan_time: float = 0.0
 
         # WebSocket broadcast callback -- set by the API layer
@@ -101,6 +102,25 @@ class BotLoop:
     def risk_manager(self) -> RiskManager:
         """Expose risk manager so the API can toggle the kill switch."""
         return self._risk
+
+    # ------------------------------------------------------------------
+    # Background task helpers
+    # ------------------------------------------------------------------
+
+    def _create_background_task(self, coro) -> asyncio.Task:
+        """Create a background task, hold a strong reference, and log errors."""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._on_background_task_done)
+        return task
+
+    def _on_background_task_done(self, task: asyncio.Task) -> None:
+        self._background_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("Background task failed: %s", exc, exc_info=exc)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -364,7 +384,7 @@ class BotLoop:
             quote.quoting_mode = quoting_mode
 
             # Persist xi estimate (fire-and-forget)
-            asyncio.create_task(self._persist_xi_estimate(symbol, xi_est))
+            self._create_background_task(self._persist_xi_estimate(symbol, xi_est))
         else:
             # Unknown mode -- default to A&S with warning
             logger.warning("Unknown quoting_mode %r, defaulting to A&S", quoting_mode)

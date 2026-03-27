@@ -638,8 +638,9 @@ async def start_theta_optimization(
 
     settings = _get_settings(request)
 
-    # Launch background optimization
-    asyncio.create_task(
+    # Launch background optimization -- store task reference on app state
+    # so it isn't garbage-collected and exceptions surface properly.
+    request.app.state.optimization_task = asyncio.create_task(
         run_theta_optimization(
             categories=categories_data,
             progress=progress,

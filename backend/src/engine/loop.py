@@ -364,6 +364,7 @@ class BotLoop:
                         category,
                         symbol,
                     )
+                    quoting_mode = "performative"
                 theta0, theta1, theta2 = 1.0, 1.0, 1.0
 
             # (d) Compute performative quote

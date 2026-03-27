@@ -47,17 +47,18 @@ class OrderBookMonitor:
         best_ask: float | None = None
         trade_prices: list[float] = []
         trade_timestamps: list[float] = []
+        prefetched_last_trade_price: float | None = None
 
         if prefetched_prices is not None:
             best_bid = prefetched_prices.get("best_bid")
             best_ask = prefetched_prices.get("best_ask")
-            ltp = prefetched_prices.get("last_trade_price")
-            if ltp is not None:
-                trade_prices = [ltp]
-            if best_bid is None and ltp is not None:
-                best_bid = ltp
-            if best_ask is None and ltp is not None:
-                best_ask = ltp
+            prefetched_last_trade_price = prefetched_prices.get("last_trade_price")
+            if prefetched_last_trade_price is not None:
+                trade_prices = [prefetched_last_trade_price]
+            if best_bid is None and prefetched_last_trade_price is not None:
+                best_bid = prefetched_last_trade_price
+            if best_ask is None and prefetched_last_trade_price is not None:
+                best_ask = prefetched_last_trade_price
         else:
             try:
                 order_book = await self._client.get_order_book(symbol)
@@ -70,18 +71,19 @@ class OrderBookMonitor:
             if order_book.asks:
                 best_ask = float(order_book.asks[0].price)
 
-            try:
-                trades = await self._client.get_trades(symbol, limit=100)
+        try:
+            trades = await self._client.get_trades(symbol, limit=100)
+            if trades:
                 trade_prices = [float(t.price) for t in trades]
                 trade_timestamps = [float(t.timestamp) for t in trades]
-            except Exception:
-                logger.warning("Failed to fetch trades for %s, continuing without", symbol)
+        except Exception:
+            logger.warning("Failed to fetch trades for %s, continuing without", symbol)
 
-            last_trade = trade_prices[-1] if trade_prices else None
-            if best_bid is None and last_trade is not None:
-                best_bid = last_trade
-            if best_ask is None and last_trade is not None:
-                best_ask = last_trade
+        last_trade = trade_prices[-1] if trade_prices else prefetched_last_trade_price
+        if best_bid is None and last_trade is not None:
+            best_bid = last_trade
+        if best_ask is None and last_trade is not None:
+            best_ask = last_trade
 
         if best_bid is None or best_ask is None:
             logger.warning(

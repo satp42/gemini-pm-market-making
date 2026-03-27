@@ -125,3 +125,27 @@ class TestOrderBookMonitor:
         assert state is not None
         with pytest.raises(AttributeError):
             state.mid_price = 0.99  # type: ignore[misc]
+
+    async def test_prefetched_prices_still_fetch_trade_history(
+        self, mock_client: AsyncMock
+    ) -> None:
+        prefetched_prices = {
+            "best_bid": 0.49,
+            "best_ask": 0.51,
+            "last_trade_price": 0.50,
+        }
+        mock_client.get_trades.return_value = [
+            _trade("0.48", ts=1700),
+            _trade("0.49", ts=1701),
+            _trade("0.50", ts=1702),
+        ]
+
+        monitor = OrderBookMonitor(mock_client)
+        state = await monitor.get_market_state("SYM", prefetched_prices=prefetched_prices)
+
+        assert state is not None
+        assert state.best_bid == pytest.approx(0.49)
+        assert state.best_ask == pytest.approx(0.51)
+        assert state.trade_prices == [0.48, 0.49, 0.50]
+        assert state.trade_timestamps == [1700.0, 1701.0, 1702.0]
+        mock_client.get_trades.assert_awaited_once_with("SYM", limit=100)

@@ -138,13 +138,30 @@ def compute_performative_quote(
             reservation_price,
             spread,
         )
-        return compute_quote(
+        as_quote = compute_quote(
             mid_price=mid_price,
             inventory=inventory,
             gamma=gamma,
             sigma_sq=sigma_sq,
             t_minus_t=t_minus_t,
             k=k,
+        )
+        return Quote(
+            bid_price=as_quote.bid_price,
+            ask_price=as_quote.ask_price,
+            reservation_price=as_quote.reservation_price,
+            spread=as_quote.spread,
+            mid_price=as_quote.mid_price,
+            inventory=as_quote.inventory,
+            sigma_sq=as_quote.sigma_sq,
+            gamma=as_quote.gamma,
+            t_minus_t=as_quote.t_minus_t,
+            k=as_quote.k,
+            xi=xi,
+            theta0=theta0,
+            theta1=theta1,
+            theta2=theta2,
+            quoting_mode=quoting_mode,
         )
 
     # --- Max spread cap ---

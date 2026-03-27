@@ -280,6 +280,27 @@ class TestBenchmark:
 class TestNaNInfGuard:
     """NaN/Inf guard falls back to A&S."""
 
+    def test_fallback_preserves_performative_metadata(self) -> None:
+        """Fallback quote should retain xi/theta/quoting metadata."""
+        q = compute_performative_quote(
+            mid_price=0.5,
+            inventory=0.0,
+            gamma=1e-308,
+            sigma_sq=0.01,
+            t_minus_t=0.5,
+            k=1.5,
+            xi=2.5,
+            theta0=1.1,
+            theta1=0.9,
+            theta2=1.2,
+            quoting_mode="theta",
+        )
+        assert q.xi == 2.5
+        assert q.theta0 == 1.1
+        assert q.theta1 == 0.9
+        assert q.theta2 == 1.2
+        assert q.quoting_mode == "theta"
+
     def test_fallback_on_extreme_values(self) -> None:
         """If the formula produces non-finite results, fall back to A&S."""
         # Force a scenario where exp overflows by using absurdly large xi*T

@@ -80,6 +80,7 @@ def compute_performative_quote(
     max_spread: float = 0.0,
     best_bid: float = 0.0,
     best_ask: float = 0.0,
+    quoting_mode: str = "performative",
 ) -> Quote:
     """Compute performative reservation price and optimal spread.
 
@@ -179,5 +180,5 @@ def compute_performative_quote(
         theta0=theta0,
         theta1=theta1,
         theta2=theta2,
-        quoting_mode="performative",
+        quoting_mode=quoting_mode,
     )

@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 
 
-@dataclass
+@dataclass(frozen=True)
 class Quote:
     """Result of the Avellaneda-Stoikov model for a single symbol."""
 

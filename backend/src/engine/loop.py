@@ -379,9 +379,8 @@ class BotLoop:
                 theta1=theta1,
                 theta2=theta2,
                 q_ref=perf.q_ref,
+                quoting_mode=quoting_mode,
             )
-            # Tag with actual mode used
-            quote.quoting_mode = quoting_mode
 
             # Persist xi estimate (fire-and-forget)
             self._create_background_task(self._persist_xi_estimate(symbol, xi_est))

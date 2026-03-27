@@ -49,6 +49,16 @@ class Ticker(BaseModel):
     volume: Decimal | None = None
 
 
+class ContractPrices(BaseModel):
+    """Price data nested inside a contract."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    best_bid: Decimal | None = Field(default=None, alias="bestBid")
+    best_ask: Decimal | None = Field(default=None, alias="bestAsk")
+    last_trade_price: Decimal | None = Field(default=None, alias="lastTradePrice")
+
+
 class Contract(BaseModel):
     """A contract within a prediction market event."""
 
@@ -56,10 +66,20 @@ class Contract(BaseModel):
 
     instrument_symbol: str = Field(default="", alias="instrumentSymbol")
     outcome: str = ""
-    best_bid: Decimal | None = Field(default=None, alias="bestBid")
-    best_ask: Decimal | None = Field(default=None, alias="bestAsk")
-    last_trade_price: Decimal | None = Field(default=None, alias="lastTradePrice")
+    prices: ContractPrices | None = None
     open_interest: Decimal | None = Field(default=None, alias="openInterest")
+
+    @property
+    def best_bid(self) -> Decimal | None:
+        return self.prices.best_bid if self.prices else None
+
+    @property
+    def best_ask(self) -> Decimal | None:
+        return self.prices.best_ask if self.prices else None
+
+    @property
+    def last_trade_price(self) -> Decimal | None:
+        return self.prices.last_trade_price if self.prices else None
 
 
 class Event(BaseModel):
@@ -67,10 +87,10 @@ class Event(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    event_ticker: str = Field(default="", alias="eventTicker")
+    event_ticker: str = Field(default="", alias="ticker")
     title: str = ""
     status: str = ""
-    expiration_date: str | None = Field(default=None, alias="expirationDate")
+    expiration_date: str | None = Field(default=None, alias="expiryDate")
     contracts: list[Contract] = Field(default_factory=list)
     category: str = ""
     mutually_exclusive: bool = Field(default=False, alias="mutuallyExclusive")
@@ -81,7 +101,7 @@ class EventsResponse(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    events: list[Event] = Field(default_factory=list)
+    events: list[Event] = Field(default_factory=list, alias="data")
     pagination: dict = Field(default_factory=dict)
 
 

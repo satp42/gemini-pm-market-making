@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.database import get_session
 from src.db.models import OrderRecord, PnlSnapshot, PositionSnapshot, Quote
+from src.gemini.client import GeminiAPIError
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ class StatusResponse(BaseModel):
 
 class MarketSummary(BaseModel):
     symbol: str
+    eventTitle: str = ""
     midPrice: float
     reservationPrice: float
     bidPrice: float
@@ -99,6 +101,7 @@ class PnlEntry(BaseModel):
 
 class PositionEntry(BaseModel):
     symbol: str
+    eventTitle: str = ""
     yesQuantity: float
     noQuantity: float
     netInventory: float
@@ -151,10 +154,11 @@ async def get_status(request: Request) -> StatusResponse:
 
     if bot_loop is not None:
         running = getattr(bot_loop, "running", False)
-        start_time = getattr(bot_loop, "start_time", None)
-        if start_time is not None and running:
-            uptime = time.time() - start_time
-        active_markets = getattr(bot_loop, "active_market_count", 0)
+        started_at = getattr(bot_loop, "started_at", None)
+        if started_at is not None and running:
+            uptime = time.time() - started_at.timestamp()
+        active_symbols = getattr(bot_loop, "active_symbols", [])
+        active_markets = len(active_symbols)
 
     environment = "sandbox"
     if settings is not None:
@@ -170,6 +174,7 @@ async def get_status(request: Request) -> StatusResponse:
 
 @router.get("/markets", response_model=list[MarketSummary])
 async def get_markets(
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> list[MarketSummary]:
     """Return the latest quote per symbol for all actively quoted markets."""
@@ -197,9 +202,13 @@ async def get_markets(
     result = await session.execute(stmt)
     quotes = result.scalars().all()
 
+    bot_loop = _get_bot_loop(request)
+    titles = getattr(bot_loop, "symbol_titles", {}) if bot_loop else {}
+
     return [
         MarketSummary(
             symbol=q.symbol,
+            eventTitle=titles.get(q.symbol, ""),
             midPrice=float(q.mid_price),
             reservationPrice=float(q.reservation_price),
             bidPrice=float(q.bid_price),
@@ -344,6 +353,7 @@ async def get_pnl(
 
 @router.get("/positions", response_model=list[PositionEntry])
 async def get_positions(
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> list[PositionEntry]:
     """Return current inventory per symbol from the latest position snapshots."""
@@ -371,9 +381,13 @@ async def get_positions(
     result = await session.execute(stmt)
     positions = result.scalars().all()
 
+    bot_loop = _get_bot_loop(request)
+    titles = getattr(bot_loop, "symbol_titles", {}) if bot_loop else {}
+
     return [
         PositionEntry(
             symbol=p.symbol,
+            eventTitle=titles.get(p.symbol, ""),
             yesQuantity=float(p.yes_quantity),
             noQuantity=float(p.no_quantity),
             netInventory=float(p.net_inventory),
@@ -394,6 +408,24 @@ async def start_bot(request: Request) -> dict[str, str]:
 
     if getattr(bot_loop, "running", False):
         raise HTTPException(status_code=409, detail="Bot is already running")
+
+    gemini_client = getattr(request.app.state, "gemini_client", None)
+    if gemini_client is None:
+        raise HTTPException(status_code=503, detail="Gemini client not initialized")
+
+    try:
+        # Fail fast on invalid API credentials before spawning a failing loop.
+        await gemini_client.get_positions()
+    except GeminiAPIError as exc:
+        if exc.status_code in {401, 403} or exc.reason.lower() in {
+            "invalidapikey",
+            "invalid_api_key",
+        }:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid Gemini API credentials; update API key/secret before starting bot.",
+            ) from exc
+        raise
 
     try:
         await bot_loop.start()

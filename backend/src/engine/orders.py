@@ -46,6 +46,7 @@ class OrderManager:
         symbol: str,
         quote: Quote,
         quantity: int = 1,
+        inventory: float = 0.0,
     ) -> tuple[Order | None, Order | None]:
         """Place a bid and an ask order for *symbol* based on *quote*.
 
@@ -79,28 +80,31 @@ class OrderManager:
                 exc_info=True,
             )
 
-        # Place ask (sell Yes at ask price)
-        try:
-            ask_order = await self._client.place_order(
-                symbol=symbol,
-                side="sell",
-                outcome="yes",
-                price=Decimal(str(round(quote.ask_price, 2))),
-                quantity=quantity,
-            )
-            logger.info(
-                "Placed ask on %s: price=%.4f qty=%d orderId=%d",
-                symbol,
-                quote.ask_price,
-                quantity,
-                ask_order.order_id,
-            )
-        except Exception:
-            logger.warning(
-                "Failed to place ask on %s at %.4f",
-                symbol,
-                quote.ask_price,
-                exc_info=True,
-            )
+        # Place ask (sell Yes at ask price) — only if we hold a YES position
+        if inventory > 0:
+            try:
+                ask_order = await self._client.place_order(
+                    symbol=symbol,
+                    side="sell",
+                    outcome="yes",
+                    price=Decimal(str(round(quote.ask_price, 2))),
+                    quantity=quantity,
+                )
+                logger.info(
+                    "Placed ask on %s: price=%.4f qty=%d orderId=%d",
+                    symbol,
+                    quote.ask_price,
+                    quantity,
+                    ask_order.order_id,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to place ask on %s at %.4f",
+                    symbol,
+                    quote.ask_price,
+                    exc_info=True,
+                )
+        else:
+            logger.info("Skipping ask on %s — no YES position to sell", symbol)
 
         return bid_order, ask_order

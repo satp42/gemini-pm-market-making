@@ -11,7 +11,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class GeminiSettings(BaseSettings):
     """Gemini API connection settings."""
 
-    model_config = SettingsConfigDict(env_prefix="GEMINI_")
+    model_config = SettingsConfigDict(
+        env_prefix="GEMINI_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     api_key: str = Field(default="", description="Gemini API key")
     api_secret: str = Field(default="", description="Gemini API secret")

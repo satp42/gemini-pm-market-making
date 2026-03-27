@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, Integer, Numeric, String, func
+from sqlalchemy import BigInteger, DateTime, Index, Integer, Numeric, String, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -51,7 +51,7 @@ class OrderRecord(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     symbol: Mapped[str] = mapped_column(String(128), nullable=False)
-    gemini_order_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    gemini_order_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     side: Mapped[str] = mapped_column(String(16), nullable=False)
     outcome: Mapped[str] = mapped_column(String(8), nullable=False)
     price: Mapped[float] = mapped_column(Numeric(18, 8), nullable=False)

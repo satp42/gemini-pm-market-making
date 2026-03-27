@@ -154,9 +154,12 @@ class GeminiClient:
 
         # The API may return the list directly or wrapped in an object
         if isinstance(data, list):
-            return EventsResponse(events=[Event.model_validate(e) for e in data], pagination={})
+            result = EventsResponse(events=[Event.model_validate(e) for e in data], pagination={})
+        else:
+            result = EventsResponse.model_validate(data)
 
-        return EventsResponse.model_validate(data)
+        logger.info("get_events returned %d events (raw type=%s)", len(result.events), type(data).__name__)
+        return result
 
     async def get_newly_listed(self) -> list[Event]:
         """Fetch newly listed prediction market events."""
@@ -239,7 +242,7 @@ class GeminiClient:
             "outcome": outcome,
             "price": str(price),
             "quantity": str(quantity),
-            "type": "limit",
+            "orderType": "limit",
             "timeInForce": time_in_force,
         }
         data = await self._request_with_retry(

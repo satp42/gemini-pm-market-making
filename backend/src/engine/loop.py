@@ -52,6 +52,7 @@ class BotLoop:
         self._running = False
         self._started_at: datetime | None = None
         self._active_symbols: list[str] = []
+        self._symbol_titles: dict[str, str] = {}
         self._task: asyncio.Task[None] | None = None
         self._last_scan_time: float = 0.0
 
@@ -73,6 +74,10 @@ class BotLoop:
     @property
     def active_symbols(self) -> list[str]:
         return list(self._active_symbols)
+
+    @property
+    def symbol_titles(self) -> dict[str, str]:
+        return dict(self._symbol_titles)
 
     @property
     def risk_manager(self) -> RiskManager:
@@ -183,10 +188,33 @@ class BotLoop:
                 # 6. Persist aggregated snapshot
                 await self._persist_tick(tick_data, inventories)
 
-                # 7. Broadcast via callback
+                # 7. Broadcast via callback (format for frontend)
                 if self.on_tick is not None:
                     try:
-                        result = self.on_tick(tick_data)
+                        uptime = (
+                            time.time() - self._started_at.timestamp()
+                            if self._started_at
+                            else 0.0
+                        )
+                        broadcast_msg = {
+                            "type": "tick",
+                            "data": {
+                                "status": {
+                                    "running": self._running,
+                                    "uptime": uptime,
+                                    "activeMarkets": len(self._active_symbols),
+                                    "environment": self._settings.gemini.env,
+                                },
+                                "markets": [
+                                    sd.get("quote_summary", {})
+                                    for sd in tick_data.get("symbols", {}).values()
+                                    if "quote_summary" in sd
+                                ],
+                                "positions": [],
+                                "pnl": {},
+                            },
+                        }
+                        result = self.on_tick(broadcast_msg)
                         if asyncio.iscoroutine(result):
                             await result
                     except Exception:
@@ -289,7 +317,7 @@ class BotLoop:
         if active_ids:
             await self._orders.cancel_stale_orders(symbol, active_ids)
 
-        bid_order, ask_order = await self._orders.place_quotes(symbol, quote)
+        bid_order, ask_order = await self._orders.place_quotes(symbol, quote, inventory=inventory)
 
         # h. Persist quote to DB
         await self._persist_quote(
@@ -318,7 +346,9 @@ class BotLoop:
         now = time.monotonic()
         if now - self._last_scan_time >= self._settings.bot.scanner_cycle_seconds:
             try:
-                self._active_symbols = await self._scanner.scan()
+                symbols, titles = await self._scanner.scan()
+                self._active_symbols = symbols
+                self._symbol_titles.update(titles)
                 self._last_scan_time = now
             except Exception:
                 logger.exception("Scanner failed -- keeping previous symbol list")

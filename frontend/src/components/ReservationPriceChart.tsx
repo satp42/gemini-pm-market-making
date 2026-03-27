@@ -123,13 +123,13 @@ const ReservationPriceChart = ({ markets }: ReservationPriceChartProps) => {
       </div>
 
       {/* Chart */}
-      <div className="h-64">
+      <div className="h-64 min-w-0 overflow-hidden">
         {markets.length === 0 ? (
           <div className="flex items-center justify-center h-full text-gray-500 text-sm">
             No market data
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height={256}>
             <ComposedChart
               data={allMarketsData}
               margin={{ top: 4, right: 8, left: 0, bottom: 0 }}

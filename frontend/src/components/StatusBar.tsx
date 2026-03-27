@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import type { BotStatus } from "@/lib/types";
-import { startBot, stopBot } from "@/lib/api";
+import { ApiRequestError, startBot, stopBot } from "@/lib/api";
 
 interface StatusBarProps {
   status: BotStatus | null;
@@ -29,6 +29,7 @@ const StatusBar = ({ status, isConnected }: StatusBarProps) => {
         await startBot();
       }
     } catch (err) {
+      if (err instanceof ApiRequestError && err.status === 409) return;
       console.error("Failed to toggle bot:", err);
     } finally {
       setToggling(false);

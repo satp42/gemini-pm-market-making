@@ -108,14 +108,20 @@ async def _build_initial_snapshot(app_state: Any) -> dict[str, Any]:
 
     if bot_loop is not None:
         running = getattr(bot_loop, "running", False)
-        start_time = getattr(bot_loop, "start_time", None)
-        uptime = (time.time() - start_time) if (start_time and running) else 0.0
+        started_at = getattr(bot_loop, "started_at", None)
+        uptime = (time.time() - started_at.timestamp()) if (started_at and running) else 0.0
+        active_symbols = getattr(bot_loop, "active_symbols", [])
         status = {
             "running": running,
             "uptime": uptime,
-            "activeMarkets": getattr(bot_loop, "active_market_count", 0),
+            "activeMarkets": len(active_symbols),
             "environment": settings.gemini.env if settings else "sandbox",
         }
+
+    # Get symbol titles from bot loop
+    titles: dict[str, str] = {}
+    if bot_loop is not None:
+        titles = getattr(bot_loop, "symbol_titles", {})
 
     # Query DB for latest snapshot data
     try:
@@ -141,6 +147,7 @@ async def _build_initial_snapshot(app_state: Any) -> dict[str, Any]:
                 markets.append(
                     {
                         "symbol": q.symbol,
+                        "eventTitle": titles.get(q.symbol, ""),
                         "midPrice": float(q.mid_price),
                         "reservationPrice": float(q.reservation_price),
                         "bidPrice": float(q.bid_price),
@@ -174,6 +181,7 @@ async def _build_initial_snapshot(app_state: Any) -> dict[str, Any]:
                 positions.append(
                     {
                         "symbol": p.symbol,
+                        "eventTitle": titles.get(p.symbol, ""),
                         "yesQuantity": float(p.yes_quantity),
                         "noQuantity": float(p.no_quantity),
                         "netInventory": float(p.net_inventory),

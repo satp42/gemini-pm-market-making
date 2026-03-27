@@ -42,7 +42,9 @@ def make_auth_headers(
     dict[str, str]
         Headers ready to be passed to an HTTP request.
     """
-    nonce = str(int(time.time() * 1000))
+    # Gemini time-based nonce keys require seconds-based timestamps (within +/-30s),
+    # while still expecting strictly increasing nonces per session.
+    nonce = f"{time.time():.6f}"
 
     body: dict[str, Any] = {
         "request": request_path,

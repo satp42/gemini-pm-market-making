@@ -46,6 +46,13 @@ async def init_db(settings: Settings) -> None:
     )
     logger.info("Database engine initialized: %s", settings.database.url.split("@")[-1])
 
+    # Create tables if they don't exist
+    from src.db.models import Base
+
+    async with _engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables ensured")
+
 
 async def close_db() -> None:
     """Dispose of the database engine.
@@ -59,6 +66,13 @@ async def close_db() -> None:
         logger.info("Database engine disposed")
     _engine = None
     _session_factory = None
+
+
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Return the session factory (for components that need it directly)."""
+    if _session_factory is None:
+        raise RuntimeError("Database not initialized. Call init_db() first.")
+    return _session_factory
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

@@ -23,8 +23,11 @@ class MarketScanner:
     # Public API
     # ------------------------------------------------------------------
 
-    async def scan(self) -> list[str]:
+    async def scan(self) -> tuple[list[str], dict[str, str]]:
         """Return instrument symbols eligible for quoting from active events.
+
+        Returns a tuple of (symbols, symbol_titles) where symbol_titles maps
+        each symbol to its parent event title.
 
         Filters applied per contract:
         1. Contract must have both a best bid and best ask.
@@ -36,7 +39,15 @@ class MarketScanner:
         events = events_response.events
 
         selected: list[str] = []
+        symbol_titles: dict[str, str] = {}
         now = datetime.now(timezone.utc)
+
+        logger.info(
+            "Scanner evaluating %d events (min_spread=%.4f, min_expiry_h=%d)",
+            len(events),
+            self._settings.min_spread,
+            self._settings.min_time_to_expiry_hours,
+        )
 
         for event in events:
             hours_to_expiry = self._hours_to_expiry(event, now)
@@ -57,6 +68,7 @@ class MarketScanner:
                 symbol = contract.instrument_symbol
                 if self._is_eligible(contract, symbol, hours_to_expiry):
                     selected.append(symbol)
+                    symbol_titles[symbol] = event.title
                     spread_val = (
                         float(contract.best_ask - contract.best_bid)
                         if contract.best_ask is not None and contract.best_bid is not None
@@ -70,7 +82,7 @@ class MarketScanner:
                     )
 
         logger.info("Scanner found %d eligible markets", len(selected))
-        return selected
+        return selected, symbol_titles
 
     async def scan_newly_listed(self) -> list[str]:
         """Return symbols from newly listed events that pass filters."""

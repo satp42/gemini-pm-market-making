@@ -68,7 +68,7 @@ const InventoryHeatmap = ({
         <table className="w-full text-sm">
           <thead>
             <tr className="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800">
-              <th className="text-left py-2 px-3 font-medium">Symbol</th>
+              <th className="text-left py-2 px-3 font-medium">Market</th>
               <th className="text-right py-2 px-3 font-medium">Net Inv.</th>
               <th className="text-right py-2 px-3 font-medium">Bid</th>
               <th className="text-right py-2 px-3 font-medium">Ask</th>
@@ -89,8 +89,15 @@ const InventoryHeatmap = ({
                     i % 2 === 0 ? "bg-gray-900" : "bg-gray-900/60"
                   }`}
                 >
-                  <td className="py-2.5 px-3 font-medium text-gray-200">
-                    {row.symbol}
+                  <td className="py-2.5 px-3">
+                    <div className="font-medium text-gray-200">
+                      {row.eventTitle || row.symbol}
+                    </div>
+                    {row.eventTitle && (
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {row.symbol}
+                      </div>
+                    )}
                   </td>
                   <td className="py-2.5 px-3 text-right">
                     <span

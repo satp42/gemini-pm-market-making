@@ -13,7 +13,7 @@ from src.api.router import router as api_router
 from src.api.ws import ConnectionManager
 from src.api.ws import router as ws_router
 from src.config import get_settings
-from src.db.database import close_db, init_db
+from src.db.database import close_db, get_session_factory, init_db
 from src.gemini.client import GeminiClient
 
 logger = logging.getLogger(__name__)
@@ -61,8 +61,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         bot_loop = BotLoop(
             settings=settings,
-            gemini_client=gemini_client,
-            ws_manager=ws_manager,
+            client=gemini_client,
+            session_factory=get_session_factory(),
         )
         app.state.bot_loop = bot_loop
 

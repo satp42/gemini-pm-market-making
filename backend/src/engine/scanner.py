@@ -1,0 +1,1 @@
+# Market scanner - implementation pending
